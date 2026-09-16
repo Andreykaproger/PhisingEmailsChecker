@@ -1,17 +1,13 @@
 import ipaddress
 import dns.resolver
-import os
 import json
 import zipfile
 import re
 
 from urllib.parse import urlparse
-from prettytable import PrettyTable
 
 
 class EmailClassification:
-    test = 0
-
     REQUIRED_FIELDS = {
         "id",
         "datetime",
@@ -31,47 +27,60 @@ class EmailClassification:
         "верификация",
     }
 
+
     def __init__(self, zip_archive):
         self.zip_archive = zip_archive
-        self.table = PrettyTable()
 
 
     def open_zip(self):
-        with zipfile.ZipFile(self.zip_archive) as archive:
-            directory = archive.filelist[0]
+        results = []
 
-            for filename in os.listdir(directory.filename):
+        with zipfile.ZipFile(self.zip_archive) as archive:
+            for filename in archive.namelist():
+                print(filename)
+                if filename.startswith("__MACOSX"):
+                    continue
+                if not filename.endswith(".json"):
+                    continue
                 try:
-                    filepath = os.path.join(directory.filename, filename)
-                    with archive.open(filepath) as file:
+                    with archive.open(filename) as file:
                         data = json.load(file)
 
                     missing = self.REQUIRED_FIELDS - data.keys()
 
                     if missing:
-                        print(f"{filename}: отсутсвуют поля {missing}")
+                        results.append({
+                            "id": f"{filename}",
+                            "error": f"Отсутствуют поля {missing}"
+                        })
                         continue
-                    else:
-                        print(f"{filename} ОК")
 
                     phishing_coeff = self.calculate_phishing_coeff(data)
 
-                    self.test += phishing_coeff
-
                     if phishing_coeff <= 3.5:
-                        print(f"письмо {filename} НЕ является фишинговым")
-                    elif 3.5 < phishing_coeff <= 5:
-                        print(f"письмо {filename} является подозрительным")
+                        status = "OK"
+                    elif phishing_coeff <= 5:
+                        status = "Подозрительное"
                     else:
-                        print(print(f"письмо {filename} является фишинговым"))
+                        status = "Фишинг"
+
+                    results.append({
+                        "id": data["id"],
+                        "coefficient": phishing_coeff,
+                        "status": status,
+                    })
 
                 except json.JSONDecodeError:
-                    print(f"{filename} некорректный JSON")
+                    results.append({
+                        "id": filename,
+                        "error": "Некорректный JSON"
+                    })
 
-            print(self.table)
+            return results
+
 
     def calculate_phishing_coeff(self, data):
-        domain = data['sender'].split("@")[1]
+        domain = data['sender'].rsplit("@",1)[1]
 
         http_url = 0
         ip_addr = False
@@ -100,15 +109,7 @@ class EmailClassification:
         for weight in features.values():
             coeff += weight
 
-        self.make_table(data["id"], features, coeff)
-
         return coeff
-
-
-    def make_table(self,id, features, coeff):
-        self.table.field_names = ["id",features.keys(),"total_coeff"]
-        self.table.add_row([id, features.values(), coeff])
-
 
 
     def has_different_domain(self, domain, urls) -> bool:
@@ -121,6 +122,7 @@ class EmailClassification:
 
         return True
 
+
     def find_suspicious_words(self,text: str, subject: str) -> list[str]:
         text = text.lower()
         subject = subject.lower()
@@ -130,6 +132,7 @@ class EmailClassification:
             for word in self.SUSPICIOUS_WORDS
             if word in text or word in subject
         ]
+
 
     @staticmethod
     def __check_spf(domain) -> bool:
@@ -147,6 +150,7 @@ class EmailClassification:
             print(f"Произошла ошибка: {e}")
 
         return False
+
 
     @staticmethod
     def __check_mx(domain: str) -> bool:
@@ -167,13 +171,16 @@ class EmailClassification:
 
         return False
 
+
     @staticmethod
     def __extract_urls_from_text(text: str) -> set[str]:
         return set(re.findall(r"https?://[^\s]+", text))
 
+
     @staticmethod
     def __is_http(url: str) -> bool:
         return urlparse(url).scheme == "http"
+
 
     @staticmethod
     def __is_ip_url(url: str) -> bool:
@@ -187,9 +194,3 @@ class EmailClassification:
             return True
         except ValueError:
             return False
-
-
-a = EmailClassification("letters.zip")
-a.open_zip()
-print(a.test)
-print(f"Средний коэффициент фишинга: {a.test/37}")

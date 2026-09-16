@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+
+<title>Результаты анализа</title>
+
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+
+</head>
+
+<body>
+
+<div class="container">
+
+
+<h1>Результаты анализа</h1>
+
+
+<div class="section">
+
+    <h2>Все письма</h2>
+
+    <div class="count">
+        Количество: {{ results|length }}
+    </div>
+
+    <table>
+
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Коэффициент</th>
+                <th>Статус</th>
+            </tr>
+        </thead>
+
+        <tbody>
+
+            {% for result in results %}
+
+            <tr>
+
+                <td>{{ result.id }}</td>
+
+                {% if result.error %}
+
+                    <td colspan="2">
+                        {{ result.error }}
+                    </td>
+
+                {% else %}
+
+                    <td>
+                        {{ "%.2f"|format(result.coefficient) }}
+                    </td>
+
+                    <td class="status">
+                        {{ result.status }}
+                    </td>
+
+                {% endif %}
+
+            </tr>
+
+            {% endfor %}
+
+        </tbody>
+
+    </table>
+
+</div>
+
+
+<div class="section">
+
+    <h2>Нефишинговые письма</h2>
+
+    <div class="count">
+        Количество: {{ normal|length }}
+    </div>
+
+    <table class="normal">
+
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Коэффициент</th>
+                <th>Статус</th>
+            </tr>
+        </thead>
+
+        <tbody>
+
+            {% for result in normal %}
+
+            <tr>
+                <td>{{ result.id }}</td>
+                <td>{{ "%.2f"|format(result.coefficient) }}</td>
+                <td class="status">{{ result.status }}</td>
+            </tr>
+
+            {% endfor %}
+
+        </tbody>
+
+    </table>
+
+</div>
+
+
+<div class="section">
+
+    <h2>Подозрительные письма</h2>
+
+    <div class="count">
+        Количество: {{ suspicious|length }}
+    </div>
+
+    <table class="suspicious">
+
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Коэффициент</th>
+                <th>Статус</th>
+            </tr>
+        </thead>
+
+        <tbody>
+
+            {% for result in suspicious %}
+
+            <tr>
+                <td>{{ result.id }}</td>
+                <td>{{ "%.2f"|format(result.coefficient) }}</td>
+                <td class="status">{{ result.status }}</td>
+            </tr>
+
+            {% endfor %}
+
+        </tbody>
+
+    </table>
+
+</div>
+
+
+<div class="section">
+
+    <h2>Фишинговые письма</h2>
+
+    <div class="count">
+        Количество: {{ phishing|length }}
+    </div>
+
+    <table class="phishing">
+
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Коэффициент</th>
+                <th>Статус</th>
+            </tr>
+        </thead>
+
+        <tbody>
+
+            {% for result in phishing %}
+
+            <tr>
+                <td>{{ result.id }}</td>
+                <td>{{ "%.2f"|format(result.coefficient) }}</td>
+                <td class="status">{{ result.status }}</td>
+            </tr>
+
+            {% endfor %}
+
+        </tbody>
+
+    </table>
+
+</div>
+
+
+</div>
+
+</body>
+</html>

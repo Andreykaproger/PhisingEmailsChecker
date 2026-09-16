@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Анализатор фишинговых писем</title>
+
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+
+</head>
+
+<body>
+
+<div class="main-container">
+
+
+<h1>Анализатор фишинговых писем</h1>
+
+<p class="description">
+    Загрузите ZIP-архив с письмами для автоматического определения
+    фишинговых и подозрительных сообщений.
+</p>
+
+<div class="upload-card">
+
+    <form action="/analyze" method="post" enctype="multipart/form-data">
+
+        <label class="upload-label" for="archive">
+            Загрузите архив в формате .zip
+        </label>
+
+        <input
+            type="file"
+            id="archive"
+            name="archive"
+            accept=".zip"
+            required
+        >
+
+        <button type="submit">
+            Анализировать
+        </button>
+
+    </form>
+
+</div>
+
+</div>
+
+</body>
+</html>
