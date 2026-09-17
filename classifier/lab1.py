@@ -1,8 +1,10 @@
 import ipaddress
-import dns.resolver
+import dns.asyncresolver
 import json
 import zipfile
 import re
+import asyncio
+from typing import cast
 
 from urllib.parse import urlparse
 
@@ -32,54 +34,25 @@ class EmailClassification:
         self.zip_archive = zip_archive
 
 
-    def open_zip(self):
-        results = []
-
+    async def open_zip(self) -> list[dict[str, str | float]]:
+        tasks = []
         with zipfile.ZipFile(self.zip_archive) as archive:
             for filename in archive.namelist():
-                print(filename)
                 if filename.startswith("__MACOSX"):
                     continue
                 if not filename.endswith(".json"):
                     continue
-                try:
-                    with archive.open(filename) as file:
-                        data = json.load(file)
 
-                    missing = self.REQUIRED_FIELDS - data.keys()
+                tasks.append(self.process_email(filename, archive))
 
-                    if missing:
-                        results.append({
-                            "id": f"{filename}",
-                            "error": f"Отсутствуют поля {missing}"
-                        })
-                        continue
+            results = await asyncio.gather(*tasks)
 
-                    phishing_coeff = self.calculate_phishing_coeff(data)
+        results = cast(list[dict[str, str]], cast(object, results))
 
-                    if phishing_coeff <= 3.5:
-                        status = "OK"
-                    elif phishing_coeff <= 5:
-                        status = "Подозрительное"
-                    else:
-                        status = "Фишинг"
-
-                    results.append({
-                        "id": data["id"],
-                        "coefficient": phishing_coeff,
-                        "status": status,
-                    })
-
-                except json.JSONDecodeError:
-                    results.append({
-                        "id": filename,
-                        "error": "Некорректный JSON"
-                    })
-
-            return results
+        return results
 
 
-    def calculate_phishing_coeff(self, data):
+    async def calculate_phishing_coeff(self, data):
         domain = data['sender'].rsplit("@",1)[1]
 
         http_url = 0
@@ -94,11 +67,15 @@ class EmailClassification:
 
         all_urls = len(urls)
 
+        spf, mx = await asyncio.gather(
+            self.__check_spf(domain),
+            self.__check_mx(domain),
+        )
 
         coeff = 0
         features = {
-            "no_spf": 0.25 if not self.__check_spf(domain) else 0,
-            "no_mx": 0.5 if not self.__check_mx(domain) else 0,
+            "no_spf": 0.25 if not spf else 0,
+            "no_mx": 0.5 if not mx else 0,
             "http_urls": 2 + http_url/all_urls if http_url > 0 else 0,
             "ip_urls": 2 if ip_addr else 0,
             "suspicious_words": 0.5 * len(self.find_suspicious_words(data['text'], data['subject'])),
@@ -110,6 +87,40 @@ class EmailClassification:
             coeff += weight
 
         return coeff
+
+
+    async def process_email(self, filename, archive) -> dict[str, str | float]:
+        try:
+            with archive.open(filename) as file:
+                data = json.load(file)
+
+            missing = self.REQUIRED_FIELDS - data.keys()
+
+            if missing:
+                return {
+                    "id": f"{filename}",
+                    "error": f"Отсутствуют поля {missing}"
+                }
+        except json.JSONDecodeError:
+            return {
+                "id": filename.split("/")[1],
+                "error": "Некорректный JSON"
+            }
+
+        phishing_coeff = await self.calculate_phishing_coeff(data)
+
+        if phishing_coeff <= 3.5:
+            status = "OK"
+        elif phishing_coeff <= 5:
+            status = "Подозрительное"
+        else:
+            status = "Фишинг"
+
+        return {
+            "id": data["id"],
+            "coefficient": phishing_coeff,
+            "status": status,
+        }
 
 
     def has_different_domain(self, domain, urls) -> bool:
@@ -135,16 +146,16 @@ class EmailClassification:
 
 
     @staticmethod
-    def __check_spf(domain) -> bool:
+    async def __check_spf(domain) -> bool:
         try:
-            answers = dns.resolver.resolve(domain, 'TXT')
+            answers = await dns.asyncresolver.resolve(domain, 'TXT')
             for rdata in answers:
                 txt_record = rdata.to_text().strip('"')
                 if txt_record.startswith('v=spf1'):
                     print(txt_record)
                     return True
             print('SPF-запись не найдена')
-        except dns.resolver.NXDOMAIN:
+        except dns.asyncresolver.NXDOMAIN:
             print(f"Домен {domain} не существует.")
         except Exception as e:
             print(f"Произошла ошибка: {e}")
@@ -153,18 +164,18 @@ class EmailClassification:
 
 
     @staticmethod
-    def __check_mx(domain: str) -> bool:
+    async def __check_mx(domain: str) -> bool:
         try:
-            answers = dns.resolver.resolve(domain, "MX")
+            answers = await dns.asyncresolver.resolve(domain, "MX")
 
             for rdata in answers:
                 print(rdata.exchange, rdata.preference)
 
             return True
 
-        except dns.resolver.NXDOMAIN:
+        except dns.asyncresolver.NXDOMAIN:
             print(f"Домен {domain} не существует.")
-        except dns.resolver.NoAnswer:
+        except dns.asyncresolver.NoAnswer:
             print(f"У домена {domain} нет MX-записи.")
         except Exception as e:
             print(f"Произошла ошибка: {e}")
