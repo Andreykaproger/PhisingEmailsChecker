@@ -1,6 +1,7 @@
 import ipaddress
 import dns.asyncresolver
 import json
+import logging
 import zipfile
 import re
 import asyncio
@@ -8,6 +9,8 @@ from typing import cast
 
 from urllib.parse import urlparse
 
+
+logger = logging.getLogger("lab1")
 
 class EmailClassification:
     REQUIRED_FIELDS = {
@@ -32,6 +35,7 @@ class EmailClassification:
 
     def __init__(self, zip_archive):
         self.zip_archive = zip_archive
+        self.semaphore = asyncio.Semaphore(15)
 
 
     async def open_zip(self) -> list[dict[str, str | float]]:
@@ -67,15 +71,26 @@ class EmailClassification:
 
         all_urls = len(urls)
 
-        spf, mx = await asyncio.gather(
+        spf, mx, dmarc = await asyncio.gather(
             self.__check_spf(domain),
             self.__check_mx(domain),
+            self.__check_dmarc(domain)
         )
+
+        dmarc_adjustment = {
+            None: 0.5,
+            "none": 0.25,
+            "quarantine": 0,
+            "reject": -0.25,
+        }
+
+        logger.info(f"{domain}: DMARC = {dmarc}")
 
         coeff = 0
         features = {
             "no_spf": 0.25 if not spf else 0,
             "no_mx": 0.5 if not mx else 0,
+            "no_dmarc": dmarc_adjustment[dmarc],
             "http_urls": 2 + http_url/all_urls if http_url > 0 else 0,
             "ip_urls": 2 if ip_addr else 0,
             "suspicious_words": 0.5 * len(self.find_suspicious_words(data['text'], data['subject'])),
@@ -145,20 +160,19 @@ class EmailClassification:
         ]
 
 
-    @staticmethod
-    async def __check_spf(domain) -> bool:
+    async def __check_spf(self, domain) -> bool:
         try:
-            answers = await dns.asyncresolver.resolve(domain, 'TXT')
+            async with self.semaphore:
+                answers = await dns.asyncresolver.resolve(domain, 'TXT')
+
             for rdata in answers:
                 txt_record = rdata.to_text().strip('"')
                 if txt_record.startswith('v=spf1'):
-                    print(txt_record)
                     return True
-            print('SPF-запись не найдена')
-        except dns.asyncresolver.NXDOMAIN:
-            print(f"Домен {domain} не существует.")
+        except dns.resolver.NXDOMAIN:
+            logger.warning(f"Домен {domain} не существует.")
         except Exception as e:
-            print(f"Произошла ошибка: {e}")
+            logger.error(f"Произошла ошибка: {e}")
 
         return False
 
@@ -169,18 +183,46 @@ class EmailClassification:
             answers = await dns.asyncresolver.resolve(domain, "MX")
 
             for rdata in answers:
-                print(rdata.exchange, rdata.preference)
+                logger.info(rdata.exchange, rdata.preference)
 
             return True
 
-        except dns.asyncresolver.NXDOMAIN:
-            print(f"Домен {domain} не существует.")
-        except dns.asyncresolver.NoAnswer:
-            print(f"У домена {domain} нет MX-записи.")
+        except dns.resolver.NXDOMAIN:
+            logger.warning(f"Домен {domain} не существует.")
+        except dns.resolver.NoAnswer:
+            logger.warning(f"У домена {domain} нет MX-записи.")
         except Exception as e:
-            print(f"Произошла ошибка: {e}")
+            logger.error(f"Произошла ошибка: {e}")
 
         return False
+
+
+    @staticmethod
+    async def __check_dmarc(domain: str) -> str | None:
+        try:
+            answers = await dns.asyncresolver.resolve(f"_dmarc.{domain}", 'TXT')
+
+            for rdata in answers:
+                txt_record = rdata.to_text().strip('"')
+
+                if not txt_record.startswith("v=DMARC1"):
+                    continue
+
+                parts = txt_record.split(";")
+
+                for part in parts:
+                    part = part.strip()
+
+                    if part.startswith("p="):
+                        policy = part.split("=", 1)[1]
+                        return policy
+
+        except dns.resolver.NXDOMAIN:
+            logger.warning(f"Домен {domain} не существует.")
+        except Exception as e:
+            logger.error(f"Произошла ошибка: {e}")
+
+        return None
 
 
     @staticmethod
